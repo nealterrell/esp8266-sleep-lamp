@@ -15,3 +15,6 @@ configurable in the code, along with most other aspects of the lamp's behavior.
 After soldering the ESP8266 and LEDs to a perfboard, I placed the lamp inside this cute little wooden birdhouse that I found at a 
 local hobby shop and painted with my toddler:
 
+![](https://github.com/nealterrell/esp8266-sleep-lamp/raw/master/birdhouse.jpg)
+
+Some white tissue paper covers the hold on the inside to diffuse the light into a nice silhouette.
