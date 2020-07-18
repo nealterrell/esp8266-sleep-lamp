@@ -7,5 +7,5 @@ constexpr char* IO_USERNAME = "x";
 constexpr char* IO_KEY = "x";
 constexpr char* IO_FEED = "x";
 
-// Change the value below to match your timezone offset from UTC.
-constexpr int32_t TIME_OFFSET = -7; // PDT
+// Change the value below to match your timezone offset from UTC in seconds.
+constexpr int32_t TIME_OFFSET = -25200; // PDT
