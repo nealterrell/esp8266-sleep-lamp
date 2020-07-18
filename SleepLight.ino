@@ -1,46 +1,25 @@
-#define DEBUG
-
 #include <NTPClient.h>
 #include <ESP8266WiFi.h>
 #include <WiFiUdp.h>
 
 #include "LampConfig.h"
 #include "WifiConfig.h"
+#include "ColorConfig.h"
 
 #include <TimeLib.h>
 #include "AdafruitIO_WiFi.h"
 
 /******************* Types *******************/ 
 enum LightMode {
+  OFF,
   BOOTING,
   CONNECTED,
-  DISABLED,
   NORMAL,
   SLEEPING, 
   WAKING,    // "transition" time from sleeping to awake.
   AWAKE,
   RAINBOW
 };
-
-// A named color code, for voice control.
-struct ColorCode {
-  const char *colorName;
-  int r;
-  int g;
-  int b;
-};
-
-
-
-/******************* Pins and constants *******************/ 
-constexpr size_t NUM_LIGHTS = 2;
-constexpr uint8_t RED_PINS[NUM_LIGHTS]   = {13, 2};
-constexpr uint8_t GREEN_PINS[NUM_LIGHTS] = {12, 0};
-constexpr uint8_t BLUE_PINS[NUM_LIGHTS]  = {14, 4};
-
-constexpr uint32_t RAINBOW_STEPS = 100;
-constexpr uint32_t RAINBOW_DURATION = 5000;
-
 
 /******************* Wifi and NTP *******************/ 
 WiFiUDP ntpUDP;
@@ -53,40 +32,11 @@ AdafruitIO_Feed *nap;
 AdafruitIO_WiFi *io;
 
 
-/******************* Colors *******************/ 
-
-#define NIGHT_LIGHT 0,0,0
-#define WAKING_LIGHT 200,200,0
-#define AWAKE_LIGHT 0,255,0
-#define NO_LIGHT 0,0,0
-
-constexpr int NUM_COLORS = 15;
-ColorCode knownColors[NUM_COLORS] = {
-  {"red", 255, 0, 0},
-  {"orange", 255, 165, 0},
-  {"yellow", 255, 255, 0},
-  {"green", 0, 255, 0},
-  {"blue", 0, 0, 255},
-  {"purple", 102, 51, 153},
-  {"white", 255, 255, 255},
-  {"brown", 165, 42, 42},
-  {"pink", 255, 105, 180},
-  {"teal", 0, 128, 128},
-  {"cyan", 0, 255, 255},
-  {"magenta", 255, 0, 255},
-  {"crimson", 153, 0, 0},
-  {"lime", 50, 205, 50},
-  {"midnight", 0, 51, 102}
-};
-
-size_t rainbowIndex[NUM_LIGHTS];
-
-
 /******************* Operation state *******************/ 
 LightMode currentMode = BOOTING;
 time_t wakeTime; // time to transition to WAKING
 unsigned long wakeDuration;  // length of transition from WAKING to AWAKE, in minutes.
-
+size_t rainbowIndex[NUM_LIGHTS]; // indexes into KNOWN_COLORS for each light.
 
 
 void setup() {
@@ -108,7 +58,7 @@ void setup() {
 
 
   // Initialize wifi and AdafruitIO connections.
-  WiFi.hostname("Ada Lamp");
+  WiFi.hostname("Sleep Training Lamp");
   io = new AdafruitIO_WiFi(IO_USERNAME, IO_KEY, WIFI_SSID, WIFI_PASS);
   nap = io->feed(IO_FEED);
   while (WiFi.status() != WL_CONNECTED) {
@@ -132,10 +82,11 @@ void setup() {
   setColorAll(10, 10, 0);
   timeClient.begin();
   timeClient.setTimeOffset(TIME_OFFSET);
+  timeClient.update();
   setSyncProvider(getNtpTime);
   while (timeStatus() == timeNotSet) {} // wait until time is set.
 
-  Serial.printf("Got current time: %d:%d\n", hour(), minute());
+  Serial.printf("Got current time: %d:%02d\n", hour(), minute());
   delay(2000);
 
   // Set color to dull green for success.
@@ -145,21 +96,9 @@ void setup() {
 }
 
 void setInitialState() {
-  currentMode = NORMAL;
-
-
-#ifdef DEBUG
-  Serial.printf("hour: %d, min: %d\n", timeClient.getHours(), timeClient.getMinutes());
-#endif
-  
-  if (timeClient.getHours() >= 20 || timeClient.getHours() <= NIGHT_WAKE_HOUR) {
-    startNightTime();
-  }
-  else {
-    currentMode = RAINBOW;
-    setColor(0, knownColors[0].r, knownColors[0].g, knownColors[0].b);
-    setColor(1, knownColors[1].r, knownColors[1].g, knownColors[1].b);
-  }
+  currentMode = RAINBOW;
+  setColor(0, KNOWN_COLORS[0].r, KNOWN_COLORS[0].g, KNOWN_COLORS[0].b);
+  setColor(1, KNOWN_COLORS[1].r, KNOWN_COLORS[1].g, KNOWN_COLORS[1].b);
 }
 
 void loop() {
@@ -169,25 +108,31 @@ void loop() {
 
   // See if we should change state based on the nap/sleep timers.
   timeClient.update();
-  time_t timeDiff = (now() - wakeTime) / SECS_PER_MIN; // number of minutes between now and the waking time.
-                                                       // will be negative if we have passed the waking time.
+  double timeDiff = (now() - wakeTime) / (double)SECS_PER_MIN; // number of minutes between now and the waking time.
+                                                        
+#ifdef DEBUG
+  Serial.printf("Time until wakeTime: %f minutes\n", timeDiff);
+#endif
 
   // If in SLEEPING, transition to WAKING if we have reached the waking time.
-  if (currentMode == SLEEPING && timeDiff <= 0) {
+  if (currentMode == SLEEPING && timeDiff >= 0) {
     Serial.println("WAKING");
     currentMode = WAKING;
     setColorAll(WAKING_LIGHT);
   }
   // If WAKING, transition to AWAKE if we have passed the waking time by wakeDuration minutes.
-  else if (currentMode == WAKING && timeDiff <= -wakeDuration) {
+  else if (currentMode == WAKING && timeDiff >= wakeDuration) {
     Serial.println("AWAKE");
     currentMode = AWAKE;
     setColorAll(AWAKE_LIGHT);
   }
   // If AWAKE, transition to NORMAL after wakeDuration has again passed.
-  else if (currentMode == AWAKE && timeDiff <= - 2 * wakeDuration) {
+  else if (currentMode == AWAKE && timeDiff >=  2 * wakeDuration) {
     Serial.println("NORMAL");
     currentMode = NORMAL;
+  }
+  else if (currentMode == OFF && AUTO_SLEEP && hour() == AUTO_SLEEP_HOUR && minute() == AUTO_SLEEP_MINUTE) {
+    startNightTime();
   }
   else if (currentMode == RAINBOW) {
     size_t newColors[NUM_LIGHTS] = {0};
@@ -199,14 +144,14 @@ void loop() {
       while (newColors[i] == rainbowIndex[i]) {
         newColors[i] = random(NUM_COLORS);
       }
-      rColors[i] = knownColors[rainbowIndex[i]].r;  
-      gColors[i] = knownColors[rainbowIndex[i]].g;  
-      bColors[i] = knownColors[rainbowIndex[i]].b;  
+      rColors[i] = KNOWN_COLORS[rainbowIndex[i]].r;  
+      gColors[i] = KNOWN_COLORS[rainbowIndex[i]].g;  
+      bColors[i] = KNOWN_COLORS[rainbowIndex[i]].b;  
 
 #ifdef DEBUG
       Serial.printf("Changing light %d from %d,%d,%d to %d,%d,%d\n", i, 
-        knownColors[rainbowIndex[i]].r, knownColors[rainbowIndex[i]].g, knownColors[rainbowIndex[i]].b,
-        knownColors[newColors[i]].r, knownColors[newColors[i]].g, knownColors[newColors[i]].b);
+        KNOWN_COLORS[rainbowIndex[i]].r, KNOWN_COLORS[rainbowIndex[i]].g, KNOWN_COLORS[rainbowIndex[i]].b,
+        KNOWN_COLORS[newColors[i]].r, KNOWN_COLORS[newColors[i]].g, KNOWN_COLORS[newColors[i]].b);
 #endif
     }
 
@@ -218,9 +163,9 @@ void loop() {
         size_t newIndex = newColors[i];
         size_t oldIndex = rainbowIndex[i];
         
-        rColors[i] += (double)(knownColors[newIndex].r - knownColors[oldIndex].r) / RAINBOW_STEPS;
-        gColors[i] += (double)(knownColors[newIndex].g - knownColors[oldIndex].g) / RAINBOW_STEPS;
-        bColors[i] += (double)(knownColors[newIndex].b - knownColors[oldIndex].b) / RAINBOW_STEPS;
+        rColors[i] += (double)(KNOWN_COLORS[newIndex].r - KNOWN_COLORS[oldIndex].r) / RAINBOW_STEPS;
+        gColors[i] += (double)(KNOWN_COLORS[newIndex].g - KNOWN_COLORS[oldIndex].g) / RAINBOW_STEPS;
+        bColors[i] += (double)(KNOWN_COLORS[newIndex].b - KNOWN_COLORS[oldIndex].b) / RAINBOW_STEPS;
         setColor(i, rColors[i], gColors[i], bColors[i]);
       }
       delay(RAINBOW_DURATION / RAINBOW_STEPS);
@@ -276,6 +221,11 @@ void startNightTime() {
   
   setColorAll(NIGHT_LIGHT);
   currentMode = SLEEPING;
+
+#ifdef DEBUG
+  Serial.printf("Now: %d:%02d on day %d\n", hour(), minute(), day());  
+  Serial.printf("Wake: %d:%02d on day %d\n", hour(wakeTime), minute(wakeTime), day(wakeTime));
+#endif
 }
 
 void startNapTime(int minutes) {
@@ -319,7 +269,8 @@ void handleMessage(AdafruitIO_Data *data) {
   }
   // "off"
   else if (received.endsWith("off")) {
-    startNormalMode(NO_LIGHT);
+    currentMode = OFF;
+    setColorAll(NO_LIGHT);
   }
   // "rainbow"
   else if (received.endsWith("rainbow")) {
@@ -328,8 +279,8 @@ void handleMessage(AdafruitIO_Data *data) {
   // some other word; see if a known color matches.
   else {
     for (int i = 0; i < NUM_COLORS; i++) {
-      if (received.endsWith(knownColors[i].colorName)) {
-        startNormalMode(knownColors[i].r, knownColors[i].g, knownColors[i].b);
+      if (received.endsWith(KNOWN_COLORS[i].colorName)) {
+        startNormalMode(KNOWN_COLORS[i].r, KNOWN_COLORS[i].g, KNOWN_COLORS[i].b);
         break;
       }
     }
@@ -337,6 +288,9 @@ void handleMessage(AdafruitIO_Data *data) {
 }
 
 time_t getNtpTime() {
+#ifdef DEBUG
+  Serial.println("Waiting for time client");
+#endif
   timeClient.update();
   return timeClient.getEpochTime();
 }
