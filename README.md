@@ -12,9 +12,23 @@ each pair is wired together, and the lamp's programming lets us set either all f
 independently of the other. It does not give off a ton of light, but it is enough to illuminate a small child's lamp. The number of LEDs is
 configurable in the code, along with most other aspects of the lamp's behavior.
 
+<img src="https://github.com/nealterrell/esp8266-sleep-lamp/raw/master/circuit-layout.png" width="200"/>
+
 After soldering the ESP8266 and LEDs to a perfboard, I placed the lamp inside this cute little wooden birdhouse that I found at a 
 local hobby shop and painted with my toddler:
 
-![](https://github.com/nealterrell/esp8266-sleep-lamp/raw/master/birdhouse.jpg)
+<img src="https://github.com/nealterrell/esp8266-sleep-lamp/raw/master/birdhouse.jpg" width="200"/>
 
 Some white tissue paper covers the hold on the inside to diffuse the light into a nice silhouette.
+
+## Software libraries
+
+1. NTPClient by Fabrice Weinberg. For synchronizing the clock.
+2. Adafruit IO Arduino by Adafruit. For receiving commands.
+3. Time by Michael Margolis. 
+
+## Configuring the lamp
+
+* ColorConfig.h defines the known colors that the lamp can be set to.
+* WifiConfig.h defines Wifi SSID and password; and Adafruit IO username, API key, and feed name.
+* LampConfig.h defines the pins that drive the LEDs, the wake-up time, and 
